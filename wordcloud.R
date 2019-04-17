@@ -27,7 +27,8 @@ alldata$Date=as.POSIXct(alldata$Date,format="%Y/%m/%d %H:%M:%S")## format 定義
 #韓參選2018-4-9
 all=alldata%>%filter(Date>="2018-4-9"&Date<"2018-11-24")
 
-###心樣本沒有(高雄在地韓國瑜News)
+##只有個人
+###樣本沒有(高雄在地韓國瑜News)
 kh <-filter(alldata,grepl("韓國瑜", alldata$Page_Name)==TRUE&
               grepl("高雄選韓國瑜News",alldata$Page_Name)==FALSE&
               grepl("韓國瑜粉絲團", alldata$Page_Name)==FALSE&
@@ -48,7 +49,7 @@ khcfan = rbind(khfan, kcfan)
 ## 分月份 group_byzp 分群的意思
 kh1 <-kh%>%group_by(month=format(Date,"%m"))%>%count()%>%mutate(type="kh")
 kc1 <-kc%>%group_by(month=format(Date,"%m"))%>%count()%>%mutate(type="kc")
-
+khc <-khc%>%group_by(month=format(Date,"%m"))%>%count()%>%mutate(type="kc")
 
 library(ggplot2) 
 ### 總po文??
@@ -85,9 +86,15 @@ khcfan%>%group_by(Page_Name,Type)%>%summarize(n=n())%>%mutate(freq=n/sum(n))%>%g
   ggtitle("貼文種類")+
   theme(plot.title = element_text(hjust = 0.5))
 
+####挑選只有經濟
+alleconomic <-filter(khc,grepl("經濟", khc$Message)==TRUE)
+#經濟分月
+alleconomic1 <-alleconomic%>%group_by(month=format(Date,"%m"))%>%count()%>%mutate(type="alleconomic")
+
+ggplot(alleconomic1,aes(x=month,y=n,fill=type))+
+  geom_bar(stat="identity",position = "dodge")
 
 ###TM
-
 library(tidyverse)
 all_msg = khcfan%>% group_by(Page_Name) %>% 
   mutate(messageByName = paste0(Message, collapse = ""))
@@ -104,11 +111,27 @@ kh_msg = kh%>% group_by(Page_Name) %>%
 id = which(duplicated(kh_msg$Page_Name) == FALSE)
 kh_msg=kh_msg[id,c(2,19)]
 
+#經濟
+economic = alleconomic%>% group_by(Page_Name) %>% 
+  mutate(messageByName = paste0(Message, collapse = ""))
+id = which(duplicated(economic$Page_Name) == FALSE)
+economic=economic[id,c(2,19)]
+
 
 ## Jieba 切詞
 library(jiebaRD)
 library(jiebaR)
 cutter <- worker("tag",stop_word ="stopwords-u8.txt",user = "user.txt" ,encoding = "UTF-8",bylines = T)
+
+dic = c("韓國瑜", "國瑜", "高雄人","貨出的去","人進得來",
+        "高雄發大財","發大財","經濟","北漂","輕軌","口號","劉家昌","韓粉","氣爆",
+        "youtuber","全台首富","假新聞","滅火器","鳳山","民主","we care","相信高雄",
+        "看好未來","溫暖","科學園區","亞洲新灣區","半導體","觀光","產業","升級","南南合作",
+        "接軌","發展","長照","好生活","共享","綠能","循環","青年","智慧城市","招商","循環",
+        "引資","雙語",,"施工","創投","臨托","交通","空污","路網","賣菜郎","賣菜",
+        "看見大海","縣市合併","住宅","正義","撕裂","又老又窮")
+new_user_word(cutter, dic)
+
 myFUN<- function(str) {
   str = gsub("[^[:alpha:]]|[A-Za-z0-9]", "", str)
   seg = cutter[str]
@@ -117,10 +140,11 @@ myFUN<- function(str) {
 segment_all = apply(matrix(all_msg$messageByName), MARGIN = 1, myFUN)
 segment_han = apply(matrix(kh_msg$messageByName), MARGIN = 1, myFUN)
 segment_chen= apply(matrix(kc_msg$messageByName), MARGIN = 1, myFUN)
+##經濟
+segment_economic= apply(matrix(economic$messageByName), MARGIN = 1, myFUN)
 
 
-
-
+## 看不懂??
 xseg = worker("tag",stop_word ="stopwords-u8.txt",user = "user.txt" ,encoding = "UTF-8",bylines = T) 
 xtext2 = NULL
 for (i in 1:length(all_msg$messageByName)){
@@ -149,12 +173,13 @@ top_han=hanfreq%>%arrange(desc(Freq))%>%head(150)
 top_chen=chenfreq%>%arrange(desc(Freq))%>%head(150)
 wordcloud(top_chen$Var1,top_chen$Freq,random.order = F, ordered.colors = F, colors=rainbow(1000))
 wordcloud(top_han$Var1,top_han$Freq,random.order = F, ordered.colors = F, colors=rainbow(1000))
-
-
-
+##經濟
+economicfreq=data.frame(table(segment_economic[[1]]))
+top_economic=economicfreq%>%arrange(desc(Freq))%>%head(150)
+wordcloud(top_economic$Var1,top_economic$Freq,random.order = F, ordered.colors = F, colors=rainbow(1000))
 
 ## 做出字詞關聯圖
-
+#陳韓
 top_han=top_han%>%head(30)
 top_chen=top_chen%>%head(30)
 topword=merge(top_chen,top_han,by="Var1",all = TRUE)
@@ -215,7 +240,23 @@ top_terms %>%
   facet_wrap(~ topic, scales = "free") +
   coord_flip() +
   theme(axis.text.y=element_text(colour="black"))
-
+###################### 經濟
+rownames(economicfreq) = economicfreq$Var1
+economicdtm=subset(economicfreq)%>%select(Freq)
+dtm_lda <- LDA(t(economicdtm), k = 6, control = list(seed = 1234))
+dtm_topics <- tidy(dtm_lda, matrix = "beta")
+top_terms <- dtm_topics %>%
+  group_by(topic) %>%
+  top_n(10, beta) %>%
+  ungroup() %>%
+  arrange(topic, -beta)
+top_terms %>%
+  mutate(term = reorder(term, beta)) %>%
+  ggplot(aes(term, beta, fill = factor(topic))) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~ topic, scales = "free") +
+  coord_flip() +
+  theme(axis.text.y=element_text(colour="black"))
 
 ## 情緒詞統計
 
